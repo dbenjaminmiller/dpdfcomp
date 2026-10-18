@@ -13,9 +13,9 @@ dpdfcomp [options] input.pdf output.pdf
 ### Font compression
 
 By default, the following font optimizations occur. To disable all, use `--no-fonts`.
-* Type 1 fonts are compressed to Type 1C/CFF. --- To disable, use `--no-type1-to-cff`.
-* Subsetting is applied to all fonts. --- To disable, use `--no-font-subset`.
-* Fonts with identical characters are merged. --- To disable, use `--no-font-merge`.
+* Type 1 fonts are compressed to Type 1C/CFF. — To disable, use `--no-type1-to-cff`.
+* Subsetting is applied to all fonts. — To disable, use `--no-font-subset`.
+* Fonts with identical characters are merged. — To disable, use `--no-font-merge`.
 
 ### Image compression
 
@@ -39,7 +39,7 @@ By default, true bilevel images which are encoded in a color codec will be re-en
 	* `jp2-lossless` - JPEG-2000 (lossless)
 	* `jpeg-XX` - JPEG with quality setting XX% (*lossy*)
 	* `jp2-lossy-XX` - JPEG-2000 with quality setting XX% (*lossy*)
-	* `bilevel` or `bilevel-XX` - Convert to bilevel (at specified threshold; 50% if not specified) --- uses bilevel settings afterwards
+	* `bilevel` or `bilevel-XX` - Convert to bilevel (at specified threshold; 50% if not specified) — uses bilevel settings afterwards
 
 White margins can be cropped from images internally using `--crop-internal`. This is technically lossy (since the images, if extracted, will no longer have their original dimensions), though visually lossless, as the placement on the page will be maintained (with a white background added if necessary).
 
@@ -55,7 +55,9 @@ If the input PDF is linearized, then the output will be linearized as well. In o
 
 # Installation
 
-MacOS and Windows users can download a binary build from the "Releases" tab. Linux users will currently need to build from source.
+* MacOS users can install via [Homebrew](https://brew.sh): `brew install dbenjaminmiller/tap/dpdfcomp`.
+* Windows users can download a binary build from the "Releases" tab.
+* Linux users will currently need to build from source.
 
 # Building
 
