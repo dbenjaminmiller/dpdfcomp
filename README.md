@@ -13,9 +13,9 @@ dpdfcomp [options] input.pdf output.pdf
 ### Font compression
 
 By default, the following font optimizations occur. To disable all, use `--no-fonts`.
-* Type 1 fonts are compressed to Type 1C/CFF. — To disable, use `--no-type1-to-cff`.
-* Subsetting is applied to all fonts. — To disable, use `--no-font-subset`.
-* Fonts with identical characters are merged. — To disable, use `--no-font-merge`.
+* Type 1 fonts are compressed to Type 1C/CFF. To disable, use `--no-type1-to-cff`.
+* Subsetting is applied to all fonts. To disable, use `--no-font-subset`.
+* Fonts with identical characters are merged. To disable, use `--no-font-merge`.
 
 ### Image compression
 
@@ -63,7 +63,7 @@ If the input PDF is linearized, then the output will be linearized as well. In o
 
 Internally, dpdfcomp is based on a library, libdpdfcomp; the command-line interface is a thin frontend.
 
-To build, make sure that you have a compiler for C++20 and C11, as well as CMake (3.24+) and pkg-config/pkgconf. GNU Make may optionally be used; the Mkaefile wraps the CMake configuration.
+To build, make sure that you have a compiler for C++20 and C11, as well as CMake (3.24+) and pkg-config/pkgconf. GNU Make may optionally be used; the Makefile wraps the CMake configuration.
 
 ## Dependencies
 
@@ -81,17 +81,17 @@ To build, make sure that you have a compiler for C++20 and C11, as well as CMake
 * afdko 5.0.1 (patched; sources included)
 * jbig2enc 0.32 (sources included)
 
-## MacOS
+### MacOS
 
 1. Install dependencies: `brew install cmake pkgconf qpdf zlib libtiff freetype libxml2 leptonica tbb jpeg-turbo openjpeg`
 2. Make: `make dynamic` or `make static`
 
-## Linux
+### Linux
 
 1. Install dependencies: `sudo apt install build-essential cmake pkg-config libqpdf-dev zlib1g-dev libtiff-dev libfreetype-dev libxml2-dev libleptonica-dev libtbb-dev libturbojpeg0-dev libopenjp2-7-dev` (or equivalent; this example is for Debian/Ubuntu)
 2. Make `make dynamic` or `make static`
 
-## Windows
+### Windows
 
 Use a recent Visual Studio/MSVC or MinGW toolchain and matching dependency packages. CMake and pkg-config must be able to find their headers and libraries. For static linking, use static packages and a matching static C runtime, such as vcpkg's `x64-windows-static` triplet. Pass your dependency manager's toolchain file to CMake. Do not mix static and dynamic Windows package variants.
 
