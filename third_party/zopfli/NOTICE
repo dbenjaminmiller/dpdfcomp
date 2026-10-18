@@ -1,0 +1,7 @@
+Selected Zopfli/ZopfliPNG and LodePNG sources.
+https://github.com/fonttools/zopfli (fork of https://github.com/google/zopfli)
+Revision: 400a50779d7272b044f0ae339c5576c0e842d79e
+Zopfli/ZopfliPNG: Apache-2.0 (COPYING).
+LodePNG: zlib license (notice in each source file).
+The selected source files are unmodified. This upstream revision includes the
+unaligned-read fix from https://github.com/fonttools/zopfli/pull/1.

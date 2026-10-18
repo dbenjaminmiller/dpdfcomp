@@ -1,0 +1,12 @@
+Selected PDFium JBIG2/fax decoder sources, based on Mozilla pdf.js.jbig2 build selection.
+PDFium revision: bb1f9f71e7b15afdd5937adf8cfe5807522b882f
+https://pdfium.googlesource.com/pdfium/
+Build headers from Mozilla pdf.js.jbig2 revision d11108f08f8a979b3ff9cbc209783ab05927c37b.
+https://github.com/mozilla/pdf.js.jbig2
+BSD-style licenses are in LICENSE and build/LICENSE.
+Local dpdfcomp change: core/fxcrt/byteorder.h uses portable constexpr byte swaps
+instead of compiler-specific builtins, enabling native MSVC builds.
+Local dpdfcomp change: fx_memory.h/cpp select the Windows aligned allocator
+by platform, including MinGW, and pair it with the Windows aligned free.
+Local dpdfcomp change: faxmodule.h/cpp honor DPDFCOMP_DECODER_ONLY to omit
+the Windows fax encoder, which depends on the unbundled graphics subsystem.

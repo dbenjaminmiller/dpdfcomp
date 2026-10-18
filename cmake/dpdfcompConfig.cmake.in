@@ -1,0 +1,20 @@
+@PACKAGE_INIT@
+
+if(TARGET dpdfcomp::dpdfcomp)
+  return()
+endif()
+if(@DPDFCOMP_STATIC@)
+  # Resolve static transitive dependencies on the consuming machine. This
+  # function keeps dependency-search settings out of the GUI project's scope.
+  function(dpdfcomp_find_dependencies)
+    set(DPDFCOMP_STATIC ON)
+    set(DPDFCOMP_FIND_INSTALLED ON)
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/Dependencies.cmake")
+    add_library(dpdfcomp::dependencies INTERFACE IMPORTED)
+    set_property(TARGET dpdfcomp::dependencies PROPERTY
+      INTERFACE_LINK_LIBRARIES "${DPDFCOMP_DEPENDENCIES}")
+  endfunction()
+  dpdfcomp_find_dependencies()
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/dpdfcompTargets.cmake")
+check_required_components(dpdfcomp)
