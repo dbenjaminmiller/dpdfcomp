@@ -702,6 +702,16 @@ static int callbackMask(t2cCtx h, int cntr,
     if (h->glyph->stem == NULL)
         return 0; /* No stem callback */
 
+    /* dpdfcomp: an empty hintmask cannot be represented by stem callbacks.
+       Expose it as an unsupported operator so the original font is retained. */
+    if (!cntr) {
+        for (i = 0; i < h->mask.length && h->mask.bytes[i] == 0; i++) {}
+        if (i == h->mask.length) {
+            callbackOp(h, t2_hintmask);
+            return 0;
+        }
+    }
+
     if (cntr && h->mask.state == 0) {
         /* Save first cntrmask */
         h->mask.state = 1;

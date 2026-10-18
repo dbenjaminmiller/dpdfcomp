@@ -11,7 +11,7 @@ namespace dpdfcomp
 {
 
 // Adobe's reader contexts and callbacks are confined to this implementation.
-class FontProgram
+class FontObject
 {
   public:
     struct Glyph {
@@ -21,24 +21,27 @@ class FontProgram
         std::set<std::string> dependencies;
         bool operator==(const Glyph&) const = default;
     };
-    FontProgram(std::string data, bool type1);
-    ~FontProgram();
-    FontProgram(const FontProgram&) = delete;
-    FontProgram& operator=(const FontProgram&) = delete;
+    FontObject(std::string data, bool type1);
+    ~FontObject();
+    FontObject(const FontObject&) = delete;
+    FontObject& operator=(const FontObject&) = delete;
 
     const std::map<std::string, Glyph>& glyphs() const;
     const std::array<std::string, 256>& encoding() const;
     std::string name() const;
-    bool compatible(const FontProgram& other) const;
-    bool has_shared_outlines(const FontProgram& other) const;
+    bool cid_keyed() const;
+    bool compatible(const FontObject& other) const;
+    bool has_shared_outlines(const FontObject& other) const;
     std::set<std::string> closure(std::set<std::string> keep) const;
 
     // A null keep-set means every glyph. Sources must have compatible rendering
     // dictionaries and identical same-named glyphs; the caller decides that policy.
-    static std::string cff(const std::vector<FontProgram*>& sources,
-                           const std::set<std::string>* keep = nullptr,
-                           const std::string& name = {});
-    bool preserves(const FontProgram& source, const std::set<std::string>& keep) const;
+    static std::string
+    cff(const std::vector<FontObject*>& sources, const std::set<std::string>* keep = nullptr,
+        const std::string& name = {},
+        const std::vector<std::map<std::string, std::string>>* mappings = nullptr);
+    bool preserves(const FontObject& source, const std::set<std::string>& keep,
+                   const std::map<std::string, std::string>* mapping = nullptr) const;
 
   private:
     struct Impl;
@@ -46,5 +49,7 @@ class FontProgram
 };
 
 const std::array<std::string, 256>& standard_encoding();
+const std::array<std::string, 256>& win_ansi_encoding();
+std::string cid_name(unsigned int cid);
 
 } // namespace dpdfcomp

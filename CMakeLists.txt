@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dpdfcomp VERSION 1.0.1 LANGUAGES C CXX)
+project(dpdfcomp VERSION 1.0.2 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -19,8 +19,8 @@ include(cmake/ThirdParty.cmake)
 add_library(dpdfcomp_core OBJECT
   src/document.cpp
   src/image_pdf.cpp src/jbig2_decoder.cpp src/reconstruction.cpp src/bilevel.cpp src/raster.cpp src/image_codecs.cpp src/png_codec.cpp src/jpeg_codec.cpp src/jp2_codec.cpp
-  src/pdf.cpp src/image_forms.cpp src/compression.cpp src/images.cpp src/jbig2.cpp src/font_program.cpp
-  src/fonts.cpp src/optimizer.cpp)
+  src/pdf.cpp src/image_forms.cpp src/compression.cpp src/images.cpp src/jbig2.cpp src/font_object.cpp
+  src/fonts.cpp src/font_plan.cpp src/font_usage.cpp src/cid_fonts.cpp src/truetype_font_object.cpp src/truetype_fonts.cpp src/optimizer.cpp)
 target_include_directories(dpdfcomp_core PUBLIC include "${PROJECT_BINARY_DIR}/include" PRIVATE src)
 target_link_libraries(dpdfcomp_core PUBLIC ${DPDFCOMP_DEPENDENCIES}
   PRIVATE afdko jbig2enc pdfium_jbig2 zopflipng)
@@ -132,6 +132,12 @@ if(BUILD_TESTING)
   find_program(PDFTOPPM_EXECUTABLE pdftoppm)
   find_program(PDFTOTEXT_EXECUTABLE pdftotext)
   find_program(QPDF_EXECUTABLE qpdf)
+  if(APPLE)
+    add_executable(dpdfcomp_quartz tests/benchmark_quartz.cpp)
+    target_link_libraries(dpdfcomp_quartz PRIVATE
+      "-framework CoreGraphics" "-framework CoreFoundation" "-framework ImageIO")
+    set(DPDFCOMP_FONT_RENDERER_ARGUMENT $<TARGET_FILE:dpdfcomp_quartz>)
+  endif()
   if(Python3_FOUND AND PDFTOPPM_EXECUTABLE AND PDFTOTEXT_EXECUTABLE AND QPDF_EXECUTABLE)
     add_test(NAME image_options
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/image_options_test.py $<TARGET_FILE:dpdfcomp>)
@@ -142,6 +148,9 @@ if(BUILD_TESTING)
     add_test(NAME font_regressions
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/font_regression_test.py
         $<TARGET_FILE:dpdfcomp> $<TARGET_FILE:dpdfcomp_font_audit> ${PDFTOPPM_EXECUTABLE})
+    add_test(NAME font_merging
+      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/font_merge_test.py
+        $<TARGET_FILE:dpdfcomp> ${DPDFCOMP_FONT_RENDERER_ARGUMENT})
     add_test(NAME rendering_and_text
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/render_test.py
         $<TARGET_FILE:dpdfcomp_tests> $<TARGET_FILE:dpdfcomp>

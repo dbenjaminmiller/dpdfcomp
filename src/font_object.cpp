@@ -1,4 +1,4 @@
-#include "font_program.hpp"
+#include "font_object.hpp"
 
 #include <absfont.h>
 #include <cffread_abs.h>
@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -22,8 +23,9 @@ namespace
 
 // AFDKO reports failures through return codes. Keep its optional diagnostics
 // inside the adapter; the optimizer reports copied fonts through its callbacks.
-class FontLogger final : public slogger {
-public:
+class FontLogger final : public slogger
+{
+  public:
     void msg(int, const char*) override {}
     void vlog(int, const char*, va_list) override {}
     int set_context(const char*, int, const char*) override { return log_context_new; }
@@ -89,7 +91,8 @@ struct IO {
             stream.position += length;
             return length;
         };
-        callbacks.write = [](ctlStreamCallbacks*, void* handle, std::size_t count, const char* bytes) {
+        callbacks.write = [](ctlStreamCallbacks*, void* handle, std::size_t count,
+                             const char* bytes) {
             auto& stream = *static_cast<Stream*>(handle);
             if (stream.position > stream.bytes.max_size() ||
                 count > stream.bytes.max_size() - stream.position) {
@@ -130,6 +133,47 @@ const char* writer_message(int code)
     return cfwErrStr(code);
 }
 
+std::vector<float> canonical_hints(const std::vector<float>& hints)
+{
+    // CFF writers may omit repeated hintmasks. Compare the active stem set
+    // at each actual change, retaining every edge and substitution position.
+    // Counter hints, stem3 and flex retain their stricter original comparison.
+    using Stem = std::array<float, 3>;
+    std::vector<float> result;
+    std::vector<Stem> current, previous;
+    float position = 0;
+    auto flush = [&] {
+        if (current.empty())
+            return;
+        std::sort(current.begin(), current.end());
+        if (current != previous) {
+            result.insert(result.end(), {position, 1, static_cast<float>(current.size())});
+            for (const auto& stem : current)
+                result.insert(result.end(), stem.begin(), stem.end());
+            previous = current;
+        }
+        current.clear();
+    };
+    if (hints.size() % 5)
+        return hints;
+    for (std::size_t i = 0; i < hints.size(); i += 5) {
+        if (hints[i + 1] != 1 || hints[i + 2] < 0 || hints[i + 2] > 9)
+            return hints;
+        const auto flags = static_cast<int>(hints[i + 2]);
+        if (hints[i + 1] != 1 || (flags & ~(ABF_VERT_STEM | ABF_NEW_HINTS)))
+            return hints;
+        if (flags & ABF_NEW_HINTS)
+            flush();
+        if (current.empty())
+            position = hints[i];
+        else if (position != hints[i])
+            return hints;
+        current.push_back({static_cast<float>(flags & ABF_VERT_STEM), hints[i + 3], hints[i + 4]});
+    }
+    flush();
+    return result;
+}
+
 } // namespace
 
 const std::array<std::string, 256>& standard_encoding()
@@ -149,7 +193,271 @@ const std::array<std::string, 256>& standard_encoding()
     return encoding;
 }
 
-struct FontProgram::Impl {
+const std::array<std::string, 256>& win_ansi_encoding()
+{
+    // PDF WinAnsiEncoding, including its bullet aliases and space/hyphen aliases.
+    static const std::array<std::string, 256> names = {
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        ".notdef",
+        "space",
+        "exclam",
+        "quotedbl",
+        "numbersign",
+        "dollar",
+        "percent",
+        "ampersand",
+        "quotesingle",
+        "parenleft",
+        "parenright",
+        "asterisk",
+        "plus",
+        "comma",
+        "hyphen",
+        "period",
+        "slash",
+        "zero",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "colon",
+        "semicolon",
+        "less",
+        "equal",
+        "greater",
+        "question",
+        "at",
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z",
+        "bracketleft",
+        "backslash",
+        "bracketright",
+        "asciicircum",
+        "underscore",
+        "grave",
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "g",
+        "h",
+        "i",
+        "j",
+        "k",
+        "l",
+        "m",
+        "n",
+        "o",
+        "p",
+        "q",
+        "r",
+        "s",
+        "t",
+        "u",
+        "v",
+        "w",
+        "x",
+        "y",
+        "z",
+        "braceleft",
+        "bar",
+        "braceright",
+        "asciitilde",
+        "bullet",
+        "Euro",
+        "bullet",
+        "quotesinglbase",
+        "florin",
+        "quotedblbase",
+        "ellipsis",
+        "dagger",
+        "daggerdbl",
+        "circumflex",
+        "perthousand",
+        "Scaron",
+        "guilsinglleft",
+        "OE",
+        "bullet",
+        "Zcaron",
+        "bullet",
+        "bullet",
+        "quoteleft",
+        "quoteright",
+        "quotedblleft",
+        "quotedblright",
+        "bullet",
+        "endash",
+        "emdash",
+        "tilde",
+        "trademark",
+        "scaron",
+        "guilsinglright",
+        "oe",
+        "bullet",
+        "zcaron",
+        "Ydieresis",
+        "space",
+        "exclamdown",
+        "cent",
+        "sterling",
+        "currency",
+        "yen",
+        "brokenbar",
+        "section",
+        "dieresis",
+        "copyright",
+        "ordfeminine",
+        "guillemotleft",
+        "logicalnot",
+        "hyphen",
+        "registered",
+        "macron",
+        "degree",
+        "plusminus",
+        "twosuperior",
+        "threesuperior",
+        "acute",
+        "mu",
+        "paragraph",
+        "periodcentered",
+        "cedilla",
+        "onesuperior",
+        "ordmasculine",
+        "guillemotright",
+        "onequarter",
+        "onehalf",
+        "threequarters",
+        "questiondown",
+        "Agrave",
+        "Aacute",
+        "Acircumflex",
+        "Atilde",
+        "Adieresis",
+        "Aring",
+        "AE",
+        "Ccedilla",
+        "Egrave",
+        "Eacute",
+        "Ecircumflex",
+        "Edieresis",
+        "Igrave",
+        "Iacute",
+        "Icircumflex",
+        "Idieresis",
+        "Eth",
+        "Ntilde",
+        "Ograve",
+        "Oacute",
+        "Ocircumflex",
+        "Otilde",
+        "Odieresis",
+        "multiply",
+        "Oslash",
+        "Ugrave",
+        "Uacute",
+        "Ucircumflex",
+        "Udieresis",
+        "Yacute",
+        "Thorn",
+        "germandbls",
+        "agrave",
+        "aacute",
+        "acircumflex",
+        "atilde",
+        "adieresis",
+        "aring",
+        "ae",
+        "ccedilla",
+        "egrave",
+        "eacute",
+        "ecircumflex",
+        "edieresis",
+        "igrave",
+        "iacute",
+        "icircumflex",
+        "idieresis",
+        "eth",
+        "ntilde",
+        "ograve",
+        "oacute",
+        "ocircumflex",
+        "otilde",
+        "odieresis",
+        "divide",
+        "oslash",
+        "ugrave",
+        "uacute",
+        "ucircumflex",
+        "udieresis",
+        "yacute",
+        "thorn",
+        "ydieresis",
+    };
+    return names;
+}
+
+struct FontObject::Impl {
     IO io;
     t1rCtx t1 = nullptr;
     cfrCtx cfr = nullptr;
@@ -199,7 +507,7 @@ struct FontProgram::Impl {
 
     void read(bool type1)
     {
-        // Require an independent font engine to accept the original program.
+        // Require an independent font engine to accept the original font.
         // A permissive parser must not turn an originally invalid font into a
         // visible one, changing a reader's missing-font fallback.
         FT_Library library = nullptr;
@@ -210,7 +518,7 @@ struct FontProgram::Impl {
         if (io.source.size() > std::size_t(std::numeric_limits<FT_Long>::max()) ||
             FT_New_Memory_Face(ft.get(), reinterpret_cast<const FT_Byte*>(io.source.data()),
                                static_cast<FT_Long>(io.source.size()), 0, &face))
-            throw std::runtime_error("FreeType rejected the font program");
+            throw std::runtime_error("FreeType rejected the embedded font");
         bool unsupported_face = face->num_faces != 1 || FT_HAS_MULTIPLE_MASTERS(face);
         FT_Done_Face(face);
         if (unsupported_face)
@@ -227,9 +535,10 @@ struct FontProgram::Impl {
             check(cfrBegFont(cfr, 0, 0, 0, &top, nullptr), cff_message);
         }
         begun = true;
-        if (top->sup.flags || top->FDArray.cnt != 1 || top->varStore ||
+        if ((top->sup.flags & ~ABF_ROS_FONT) || top->FDArray.cnt != 1 || top->varStore ||
             top->FDArray.array[0].Private.numRegions > 0)
-            throw std::runtime_error("only static, name-keyed fonts are supported");
+            throw std::runtime_error(
+                "only static CFF fonts with one font dictionary are supported");
         // The CFF reader duplicates static values into its variation-only
         // fields; the Type 1 reader leaves those fields zero. They have no
         // meaning in the static fonts accepted here.
@@ -246,11 +555,14 @@ struct FontProgram::Impl {
         cb.beg = [](abfGlyphCallbacks* cb, abfGlyphInfo* info) -> int {
             cb->info = info;
             auto& reader = self(cb);
-            if (!info->gname.ptr || (info->flags & (ABF_GLYPH_CID | ABF_GLYPH_UNICODE))) {
+            if ((info->flags & ABF_GLYPH_UNICODE) ||
+                (!(info->flags & ABF_GLYPH_CID) && !info->gname.ptr)) {
                 reader.unsupported = true;
                 return ABF_SKIP_RET;
             }
-            auto [it, added] = reader.glyphs.emplace(info->gname.ptr, Glyph{});
+            const auto name =
+                (info->flags & ABF_GLYPH_CID) ? cid_name(info->cid) : std::string(info->gname.ptr);
+            auto [it, added] = reader.glyphs.emplace(name, Glyph{});
             if (!added) {
                 reader.unsupported = true;
                 return ABF_SKIP_RET;
@@ -258,7 +570,7 @@ struct FontProgram::Impl {
             reader.current = &it->second;
             for (auto* entry = &info->encoding; entry; entry = entry->next)
                 if (entry->code < 256)
-                    reader.encoding[entry->code] = info->gname.ptr;
+                    reader.encoding[entry->code] = name;
             return ABF_CONT_RET;
         };
         cb.width = [](abfGlyphCallbacks* cb, float width) { self(cb).current->width = width; };
@@ -289,38 +601,50 @@ struct FontProgram::Impl {
         iterate(cb);
         if (unsupported || !glyphs.contains(".notdef"))
             throw std::runtime_error("font contains unsupported glyph operations");
-        for (const auto& [name, glyph] : glyphs) {
+        for (auto& [name, glyph] : glyphs) {
             (void)name;
             auto finite = [](float value) { return std::isfinite(value); };
             if (!finite(glyph.width) ||
                 !std::all_of(glyph.drawing.begin(), glyph.drawing.end(), finite) ||
                 !std::all_of(glyph.hints.begin(), glyph.hints.end(), finite))
                 throw std::runtime_error("font contains nonfinite glyph coordinates or metrics");
+            glyph.hints = canonical_hints(glyph.hints);
         }
     }
 };
 
-FontProgram::FontProgram(std::string data, bool type1)
+FontObject::FontObject(std::string data, bool type1)
     : impl_(std::make_unique<Impl>(std::move(data)))
 {
     impl_->read(type1);
 }
-FontProgram::~FontProgram() = default;
-const std::map<std::string, FontProgram::Glyph>& FontProgram::glyphs() const
+FontObject::~FontObject() = default;
+const std::map<std::string, FontObject::Glyph>& FontObject::glyphs() const
 {
     return impl_->glyphs;
 }
-const std::array<std::string, 256>& FontProgram::encoding() const
+const std::array<std::string, 256>& FontObject::encoding() const
 {
     return impl_->encoding;
 }
-std::string FontProgram::name() const
+std::string FontObject::name() const
 {
-    const auto* name = impl_->top->FDArray.array[0].FontName.ptr;
+    const auto* name =
+        cid_keyed() ? impl_->top->cid.CIDFontName.ptr : impl_->top->FDArray.array[0].FontName.ptr;
     return name ? name : "";
 }
 
-bool FontProgram::compatible(const FontProgram& other) const
+bool FontObject::cid_keyed() const
+{
+    return impl_->top->sup.flags & ABF_ROS_FONT;
+}
+
+std::string cid_name(unsigned int cid)
+{
+    return cid ? "cid" + std::to_string(cid) : ".notdef";
+}
+
+bool FontObject::compatible(const FontObject& other) const
 {
     auto* a = impl_->top;
     auto* b = other.impl_->top;
@@ -328,6 +652,7 @@ bool FontProgram::compatible(const FontProgram& other) const
         return std::string_view(x.ptr ? x.ptr : "") == std::string_view(y.ptr ? y.ptr : "");
     };
     return !abfCompareTopDicts(a, b) &&
+           !abfCompareFontDicts(&a->FDArray.array[0], &b->FDArray.array[0]) &&
            std::equal(std::begin(a->FontBBox), std::end(a->FontBBox), std::begin(b->FontBBox)) &&
            same_string(a->Notice, b->Notice) && same_string(a->Copyright, b->Copyright) &&
            a->FSType == b->FSType &&
@@ -335,8 +660,16 @@ bool FontProgram::compatible(const FontProgram& other) const
                b->FDArray.array[0].Private.initialRandomSeed;
 }
 
-bool FontProgram::has_shared_outlines(const FontProgram& other) const
+bool FontObject::has_shared_outlines(const FontObject& other) const
 {
+    if (cid_keyed()) {
+        for (const auto& [name, glyph] : glyphs())
+            if (name != ".notdef" && !glyph.drawing.empty())
+                for (const auto& [other_name, other_glyph] : other.glyphs())
+                    if (other_name != ".notdef" && glyph == other_glyph)
+                        return true;
+        return false;
+    }
     bool shared = false;
     for (const auto& [name, glyph] : glyphs()) {
         auto found = other.glyphs().find(name);
@@ -350,7 +683,7 @@ bool FontProgram::has_shared_outlines(const FontProgram& other) const
     return shared;
 }
 
-std::set<std::string> FontProgram::closure(std::set<std::string> keep) const
+std::set<std::string> FontObject::closure(std::set<std::string> keep) const
 {
     keep.insert(".notdef");
     std::vector<std::string> pending(keep.begin(), keep.end());
@@ -367,13 +700,16 @@ std::set<std::string> FontProgram::closure(std::set<std::string> keep) const
     return keep;
 }
 
-bool FontProgram::preserves(const FontProgram& source, const std::set<std::string>& keep) const
+bool FontObject::preserves(const FontObject& source, const std::set<std::string>& keep,
+                           const std::map<std::string, std::string>* mapping) const
 {
     if (!compatible(source))
         return false;
     for (const auto& name : keep) {
         auto before = source.glyphs().find(name);
-        auto after = glyphs().find(name);
+        auto mapped =
+            mapping ? mapping->find(name) : std::map<std::string, std::string>::const_iterator{};
+        auto after = glyphs().find(mapping && mapped != mapping->end() ? mapped->second : name);
         // A missing component must stay missing. A union that supplies it can
         // change a seac glyph even when every PDF character mapping is intact.
         if (before == source.glyphs().end() && after != glyphs().end())
@@ -385,8 +721,9 @@ bool FontProgram::preserves(const FontProgram& source, const std::set<std::strin
     return true;
 }
 
-std::string FontProgram::cff(const std::vector<FontProgram*>& sources,
-                             const std::set<std::string>* keep, const std::string& name)
+std::string FontObject::cff(const std::vector<FontObject*>& sources,
+                            const std::set<std::string>* keep, const std::string& name,
+                            const std::vector<std::map<std::string, std::string>>* mappings)
 {
     if (sources.empty())
         throw std::runtime_error("no font sources");
@@ -401,25 +738,47 @@ std::string FontProgram::cff(const std::vector<FontProgram*>& sources,
     struct Selection {
         const std::set<std::string>* keep;
         std::set<std::string> emitted;
-    } selection{keep, {}};
+        const std::map<std::string, std::string>* mapping = nullptr;
+        std::deque<abfGlyphInfo> glyphs;
+    } selection{keep, {}, nullptr, {}};
     auto callbacks = cfwGlyphCallbacks;
     callbacks.direct_ctx = writer.get();
     callbacks.indirect_ctx = &selection;
     callbacks.beg = [](abfGlyphCallbacks* cb, abfGlyphInfo* info) -> int {
         auto& selection = *static_cast<Selection*>(cb->indirect_ctx);
-        std::string name = info->gname.ptr;
+        std::string name = (info->flags & ABF_GLYPH_CID) ? cid_name(info->cid) : info->gname.ptr;
+        if (selection.mapping) {
+            auto found = selection.mapping->find(name);
+            if (found == selection.mapping->end())
+                return ABF_SKIP_RET;
+            name = found->second;
+            selection.glyphs.push_back(*info);
+            info = &selection.glyphs.back();
+            info->cid =
+                name == ".notdef" ? 0 : static_cast<unsigned short>(std::stoul(name.substr(3)));
+        }
         if ((selection.keep && !selection.keep->contains(name)) ||
             !selection.emitted.insert(name).second)
             return ABF_SKIP_RET;
         info->flags &= ~ABF_GLYPH_SEEN;
         return cfwGlyphCallbacks.beg(cb, info);
     };
-    for (auto* source : sources)
-        source->impl_->iterate(callbacks);
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+        selection.mapping = mappings ? &mappings->at(i) : nullptr;
+        sources[i]->impl_->iterate(callbacks);
+    }
     auto top = *sources.front()->impl_->top;
     auto font_dictionary = top.FDArray.array[0];
     if (!name.empty())
         font_dictionary.FontName.ptr = const_cast<char*>(name.c_str());
+    if (!name.empty() && sources.front()->cid_keyed())
+        top.cid.CIDFontName.ptr = const_cast<char*>(name.c_str());
+    if (sources.front()->cid_keyed()) {
+        top.cid.CIDCount = 1;
+        for (const auto& glyph : selection.emitted)
+            if (glyph != ".notdef")
+                top.cid.CIDCount = std::max(top.cid.CIDCount, std::stol(glyph.substr(3)) + 1);
+    }
     top.FDArray.array = &font_dictionary;
     // Compatible sources have identical bounds. Keep the first dictionary intact.
     check(cfwEndFont(writer.get(), &top), writer_message);
