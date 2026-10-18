@@ -156,31 +156,23 @@ Replacement stream_replacement(Object stream, std::string bytes, const std::stri
     return {dictionary, std::move(bytes), true};
 }
 
-std::vector<std::string> check_document(QPDF& pdf)
+std::vector<std::string> take_pdf_warnings(QPDF& pdf)
 {
-    if (pdf.isEncrypted())
-        throw std::runtime_error("encrypted PDFs are not supported by the preserving writer");
-    std::vector<std::string> notes;
-    auto size = pdf.getTrailer().getKey("/Size");
-    const auto xref = pdf.getXRefTable();
-    const auto highest = xref.empty() ? 0 : xref.rbegin()->first.getObj();
-    const std::string size_warning =
-        size.isInteger()
-            ? "reported number of objects (" + std::to_string(size.getIntValue()) +
-                  ") is not one plus the highest object number (" + std::to_string(highest) + ")"
-            : "";
-    for (const auto& warning : pdf.getWarnings()) {
-        // /Size is xref bookkeeping that this writer always regenerates. Permit
-        // only this exact diagnostic, never recovery or other parser warnings.
-        if (size_warning.empty() || warning.getMessageDetail() != size_warning)
-            throw std::runtime_error("input has PDF warnings; refusing an implicit repair: " +
-                                     warning.getMessageDetail());
-        notes.push_back("input trailer /Size is inconsistent; rebuilt if the file shrinks");
+    std::map<std::string, std::size_t> counts;
+    for (const auto& warning : pdf.getWarnings())
+        ++counts[warning.getMessageDetail()];
+    std::vector<std::string> warnings;
+    for (const auto& [message, count] : counts) {
+        auto text = "input PDF: " + message;
+        if (count > 1)
+            text += " (" + std::to_string(count) + " occurrences)";
+        warnings.push_back(std::move(text));
     }
-    return notes;
+    return warnings;
 }
 
-void write_pdf(QPDF& pdf, const Replacements& replacements, const std::filesystem::path& path)
+void write_pdf(QPDF& pdf, const Replacements& replacements, const std::filesystem::path& path,
+               bool preserve_object_streams)
 {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.exceptions(std::ios::badbit | std::ios::failbit);
@@ -203,7 +195,11 @@ void write_pdf(QPDF& pdf, const Replacements& replacements, const std::filesyste
             continue;
         auto replacement = replacements.find(id);
         auto previous = original_xref.find(id);
-        if (replacement == replacements.end() && previous != original_xref.end() &&
+        // Reusing an object-stream entry would also reuse its malformed syntax.
+        // During repair, write the parsed object explicitly instead. The old
+        // stream's bytes stay intact, but no xref entries point inside it.
+        if (preserve_object_streams && replacement == replacements.end() &&
+            previous != original_xref.end() &&
             previous->second.getType() == 2) {
             const auto& entry = previous->second;
             entries[id.getObj()] = {2, static_cast<std::uint64_t>(entry.getObjStreamNumber()),
@@ -271,7 +267,7 @@ void write_pdf(QPDF& pdf, const Replacements& replacements, const std::filesyste
                     << (entry->second.type == 0 ? " f \n" : " n \n");
             }
         }
-        trailer.replaceKey("/Size", Object::newInteger(largest + 1));
+        trailer.replaceKey("/Size", Object::newInteger(entries.rbegin()->first + 1));
         out << "trailer\n" << trailer.unparseResolved() << '\n';
     }
     out << "startxref\n" << xref_offset << "\n%%EOF\n";

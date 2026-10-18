@@ -41,10 +41,12 @@ Replacement stream_replacement(Object stream, std::string bytes, const std::stri
 
 // Preserve object numbers, generation numbers, original object streams, trailer
 // metadata, and every unrelated encoded stream. Only xref storage is rebuilt.
-void write_pdf(QPDF& pdf, const Replacements& replacements, const std::filesystem::path& path);
+void write_pdf(QPDF& pdf, const Replacements& replacements, const std::filesystem::path& path,
+               bool preserve_object_streams = true);
 void verify_pdf(QPDF& original, const Replacements& replacements,
                 const std::filesystem::path& path);
-std::vector<std::string> check_document(QPDF& pdf);
+// Consume parser diagnostics, grouping repeated messages from different objects.
+std::vector<std::string> take_pdf_warnings(QPDF& pdf);
 // Signature data is removed through the same replacement plan as compression.
 // Returns true when the input contained a signature.
 bool remove_signatures(QPDF& pdf, Replacements& replacements);

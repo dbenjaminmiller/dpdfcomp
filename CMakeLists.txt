@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dpdfcomp VERSION 1.0 LANGUAGES C CXX)
+project(dpdfcomp VERSION 1.0.1 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -61,6 +61,7 @@ target_compile_definitions(dpdfcomp_core PRIVATE libdpdfcomp_EXPORTS)
 
 if(DPDFCOMP_BUILD_CLI)
   add_executable(dpdfcomp src/main.cpp)
+  target_compile_definitions(dpdfcomp PRIVATE DPDFCOMP_VERSION="${PROJECT_VERSION}")
   target_link_libraries(dpdfcomp PRIVATE dpdfcomp::dpdfcomp)
   if(MINGW)
     target_link_options(dpdfcomp PRIVATE -municode)
@@ -136,6 +137,8 @@ if(BUILD_TESTING)
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/image_options_test.py $<TARGET_FILE:dpdfcomp>)
     add_test(NAME jp2_palette
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/jp2_palette_test.py $<TARGET_FILE:dpdfcomp>)
+    add_test(NAME pdf_repair
+      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/pdf_repair_test.py $<TARGET_FILE:dpdfcomp>)
     add_test(NAME font_regressions
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/font_regression_test.py
         $<TARGET_FILE:dpdfcomp> $<TARGET_FILE:dpdfcomp_font_audit> ${PDFTOPPM_EXECUTABLE})

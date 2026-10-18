@@ -18,7 +18,7 @@
 
 namespace
 {
-constexpr std::string_view help = R"(dpdfcomp 1.0 - PDF font and image compression
+constexpr std::string_view help = "dpdfcomp " DPDFCOMP_VERSION R"( - PDF font and image compression
 
 Usage: dpdfcomp [options] input.pdf output.pdf
 
@@ -274,7 +274,7 @@ int run(int argc, char** argv)
                 return 0;
             } else if (arg == "--version") {
                 if (!quiet)
-                    std::cout << "dpdfcomp 1.0\n";
+                    std::cout << "dpdfcomp " DPDFCOMP_VERSION "\n";
                 return 0;
             } else if (arg == "--no-fonts")
                 options.fonts = false;

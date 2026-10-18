@@ -104,11 +104,22 @@ Report optimize(const std::filesystem::path& input, const std::filesystem::path&
     pdf.setAttemptRecovery(false);
     pdf.setSuppressWarnings(true);
     pdf.processFile(utf8_path(input).c_str());
+    if (pdf.isEncrypted())
+        throw std::runtime_error("encrypted PDFs are not supported by the preserving writer");
+    // Resolve lazy dictionaries before compression so syntax warnings are
+    // reported even for objects that neither optimization pass touches.
+    pdf.getAllObjects();
     Report report;
-    report.warnings = check_document(pdf);
-    if (options.warning)
-        for (const auto& warning : report.warnings)
-            options.warning(warning);
+    bool repair_input = false;
+    auto collect_warnings = [&] {
+        for (const auto& warning : take_pdf_warnings(pdf)) {
+            repair_input = true;
+            report.warnings.push_back(warning);
+            if (options.warning)
+                options.warning(warning);
+        }
+    };
+    collect_warnings();
     report.input_bytes = fs::file_size(input);
     const bool linearized = options.linearize || pdf.isLinearized();
     Replacements changes;
@@ -128,13 +139,13 @@ Report optimize(const std::filesystem::path& input, const std::filesystem::path&
         if (options.warning)
             options.warning(warning);
     }
-    if (pdf.anyWarnings())
-        throw std::runtime_error("input warnings encountered; output not written");
+    collect_warnings();
     TemporaryFile temporary(output);
     const bool must_rewrite = signed_input || linearized;
-    if (!changes.empty() || must_rewrite) {
-        write_pdf(pdf, changes, temporary.path());
+    if (!changes.empty() || must_rewrite || repair_input) {
+        write_pdf(pdf, changes, temporary.path(), !repair_input);
         verify_pdf(pdf, changes, temporary.path());
+        collect_warnings();
         if (linearized) {
             TemporaryFile linearized_output(output);
             linearize_pdf(temporary.path(), linearized_output.path());
@@ -142,7 +153,7 @@ Report optimize(const std::filesystem::path& input, const std::filesystem::path&
                           fs::copy_options::overwrite_existing);
         }
     }
-    if (!must_rewrite &&
+    if (!must_rewrite && !repair_input &&
         (changes.empty() ||
          (!report.images_forced && fs::file_size(temporary.path()) >= report.input_bytes))) {
         fs::copy_file(input, temporary.path(), fs::copy_options::overwrite_existing);
