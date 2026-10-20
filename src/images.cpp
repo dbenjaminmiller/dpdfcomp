@@ -61,6 +61,8 @@ struct Work {
     bool original_allowed = true;
     bool specified_only = false;
     bool detected = false;
+    bool transparency_mask = false;
+    bool thresholds_skipped = false;
     std::string error;
 };
 
@@ -349,6 +351,7 @@ void optimize_images(QPDF& pdf, Replacements& changes, const Options& options, R
         consumed.insert(image.strips.begin(), image.strips.end());
     }
     auto objects = pdf.getAllObjects();
+    const auto masks = transparency_masks(pdf);
     const auto compatible = (options.pdf_stripe_rows || options.crop_internal)
                                 ? form_compatible_images(pdf)
                                 : std::set<ObjectId>{};
@@ -380,6 +383,7 @@ void optimize_images(QPDF& pdf, Replacements& changes, const Options& options, R
                 std::lock_guard lock(pdf_mutex);
                 work->source = *next++;
                 work->target = work->source.getObjGen();
+                work->transparency_mask = masks.contains(work->target);
                 if (auto it = reconstructed_index.find(work->target);
                     it != reconstructed_index.end()) {
                     work->reconstruction = std::move(reconstructed[it->second]);
@@ -399,8 +403,13 @@ void optimize_images(QPDF& pdf, Replacements& changes, const Options& options, R
                         for (auto id : work->reconstruction->strips)
                             originally_lossy |=
                                 lossy_input(pdf.getObjectByObjGen(id).getDict().getKey("/Filter"));
-                    const auto& selected_color =
+                    auto selected_color =
                         originally_lossy ? options.color_lossy : options.color_lossless;
+                    // Thresholding would harden soft transparency edges. Exact black and
+                    // white detection still applies, since it is lossless.
+                    auto threshold = [](ColorEncoding c) { return c.codec == ColorCodec::bilevel; };
+                    if (work->transparency_mask)
+                        work->thresholds_skipped = std::erase_if(selected_color, threshold) > 0;
                     const bool bilevel_enabled = options.recompress_bilevel &&
                                                  (options.bilevel_flate || options.ccitt ||
                                                   options.jbig2 || options.bilevel_png_iterations);
@@ -422,6 +431,8 @@ void optimize_images(QPDF& pdf, Replacements& changes, const Options& options, R
                     Variant variant;
                     variant.color_codecs =
                         originally_lossy ? codec_options.color_lossy : codec_options.color_lossless;
+                    if (work->transparency_mask)
+                        std::erase_if(variant.color_codecs, threshold);
                     if (!work->originally_bilevel && variant.color_codecs.empty() &&
                         !options.detect_bilevel && d.hasKey("/BitsPerComponent"))
                         throw std::runtime_error("color image compression is disabled");
@@ -473,10 +484,19 @@ void optimize_images(QPDF& pdf, Replacements& changes, const Options& options, R
                         return work;
                     try {
                         auto& original = work->variants.front();
-                        std::vector<int> thresholds;
+                        std::vector<ColorEncoding> conversions;
                         for (auto encoding : original.color_codecs)
-                            if (encoding.codec == ColorCodec::bilevel)
-                                thresholds.push_back(encoding.parameter);
+                            if (encoding.codec == ColorCodec::bilevel) {
+                                if (encoding.smooth)
+                                    encoding.parameter = 0; // Otsu's method chooses instead.
+                                if (std::none_of(conversions.begin(), conversions.end(),
+                                                 [&](auto other) {
+                                                     return other.parameter == encoding.parameter &&
+                                                            other.scale == encoding.scale &&
+                                                            other.smooth == encoding.smooth;
+                                                 }))
+                                    conversions.push_back(encoding);
+                            }
                         auto converted =
                             !original.raster.bilevel() && options.detect_bilevel
                                 ? convert_bilevel(original.raster, work->bilevel, std::nullopt)
@@ -505,10 +525,10 @@ void optimize_images(QPDF& pdf, Replacements& changes, const Options& options, R
                                 (!options.recompress_bilevel || options.bilevel_flate ||
                                  options.ccitt || options.jbig2 || options.bilevel_png_iterations);
                         } else {
-                            for (int threshold : thresholds)
+                            for (auto conversion : conversions)
                                 if (!work->variants.front().raster.bilevel())
                                     if (auto result = convert_bilevel(work->variants.front().raster,
-                                                                      work->bilevel, threshold))
+                                                                      work->bilevel, conversion))
                                         work->variants.push_back(
                                             make_variant(std::move(*result), true));
                         }
@@ -646,6 +666,10 @@ void optimize_images(QPDF& pdf, Replacements& changes, const Options& options, R
                                                      : ": " + work->error));
                         else if (work->error.empty())
                             work->error = "no smaller enabled encoding for this sample layout";
+                        if (work->thresholds_skipped)
+                            report.notes.push_back("image " +
+                                                   object_label(work->source.getObjGen()) +
+                                                   ": transparency mask not thresholded to bilevel");
                         if (!work->error.empty())
                             report.notes.push_back("image " +
                                                    object_label(work->source.getObjGen()) + ": " +

@@ -39,7 +39,9 @@ By default, true bilevel images which are encoded in a color codec will be re-en
 	* `jp2-lossless` - JPEG-2000 (lossless)
 	* `jpeg-XX` - JPEG with quality setting XX% (*lossy*)
 	* `jp2-lossy-XX` - JPEG-2000 with quality setting XX% (*lossy*)
-	* `bilevel` or `bilevel-XX` - Convert to bilevel (at specified threshold; 50% if not specified) — uses bilevel settings afterwards
+	* `bilevel` or `bilevel-XX` - Convert to bilevel (at specified threshold; 50% if not specified) — uses bilevel settings afterwards.
+	* `bilevel-scale-XX` — scales the image to XX% before bileveling.
+	* `bilevel-smooth` — does bilevel conversion using Otsu's method and Savitzky-Golay smoothing.
 
 White margins can be cropped from images internally using `--crop-internal`. This is technically lossy (since the images, if extracted, will no longer have their original dimensions), though visually lossless, as the placement on the page will be maintained (with a white background added if necessary).
 

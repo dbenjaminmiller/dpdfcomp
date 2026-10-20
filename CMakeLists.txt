@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(dpdfcomp VERSION 1.0.2 LANGUAGES C CXX)
+project(dpdfcomp VERSION 1.1 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)

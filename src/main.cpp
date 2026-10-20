@@ -51,7 +51,8 @@ Usage: dpdfcomp [options] input.pdf output.pdf
   --help                 Show this help
   --version              Show the program version
 
-Color codecs: png[-X],lzw,zip,jpeg[-XX],jp2-lossless,jp2-lossy[-XX],bilevel[-XX],all,none
+Color codecs: png[-X],lzw,zip,jpeg[-XX],jp2-lossless,jp2-lossy[-XX],bilevel[-XX],
+              bilevel-scale-XX,bilevel-smooth,all,none
 Bilevel codecs: flate,ccitt,jbig2,png[-X],all,none
 
 Add specified-only to allow only specified output codecs, even if bigger than the original.
@@ -61,6 +62,8 @@ all results in using all available lossless codecs.
 png runs ZopfliPNG with X iterations (default: 15).
 jpeg quality is 0-100 (default: 75). Lossy JP2 0-100 (default: 75) targets PSNR 20-60 dB.
 Bilevel thresholds are 0-100% (default: 50).
+bilevel-scale-XX scales the image to XX% before bileveling.
+bilevel-smooth does bilevel conversion using Otsu's method and Savitzky-Golay smoothing.
 
 PDF strips/crops preserve samples and placement; viewer sampling can change.
 
@@ -108,22 +111,29 @@ std::vector<std::string> explicit_codecs(std::string_view list)
 {
     std::vector<std::string> result;
     for (auto item : list_items(list))
-        if (item != "all" && item != "specified-only")
+        if (item != "all" && item != "specified-only" && item != "bilevel-smooth" &&
+            !item.starts_with("bilevel-scale"))
             result.emplace_back(item);
     return result;
 }
 
-std::vector<dpdfcomp::ColorEncoding> color_encodings(std::string_view list, bool& specified_only)
+// Warnings are collected until the warning callback is installed.
+std::vector<dpdfcomp::ColorEncoding> color_encodings(std::string_view list, bool& specified_only,
+                                                     std::vector<std::string>& warnings)
 {
     using Codec = dpdfcomp::ColorCodec;
     std::vector<dpdfcomp::ColorEncoding> result;
     specified_only = false;
+    warnings.clear();
+    std::optional<int> scale;
+    bool smooth = false, threshold = false;
     for (auto item : list_items(list)) {
         if (item == "specified-only")
             specified_only = true;
         else if (item == "all") {
             bool ignored = false;
-            auto all = color_encodings("png,lzw,zip,jp2-lossless", ignored);
+            std::vector<std::string> none;
+            auto all = color_encodings("png,lzw,zip,jp2-lossless", ignored, none);
             result.insert(result.end(), all.begin(), all.end());
         } else if (item == "png" || item.starts_with("png-"))
             result.push_back({Codec::png, png_iterations(item)});
@@ -135,9 +145,18 @@ std::vector<dpdfcomp::ColorEncoding> color_encodings(std::string_view list, bool
             result.push_back({Codec::jp2_lossless});
         else if (item == "bilevel")
             result.push_back({Codec::bilevel, 50});
-        else if (item.starts_with("bilevel-"))
+        else if (item == "bilevel-smooth")
+            smooth = true;
+        else if (item.starts_with("bilevel-scale")) {
+            const auto value = number(item.starts_with("bilevel-scale-") ? item.substr(14) : "", 1,
+                                      dpdfcomp::max_bilevel_scale, "bilevel scale");
+            if (scale && *scale != value)
+                throw std::runtime_error("only one bilevel scale may be specified");
+            scale = value;
+        } else if (item.starts_with("bilevel-")) {
             result.push_back({Codec::bilevel, number(item.substr(8), 0, 100, "bilevel threshold")});
-        else if (item == "jpeg" || item.starts_with("jpeg-"))
+            threshold = true;
+        } else if (item == "jpeg" || item.starts_with("jpeg-"))
             result.push_back({Codec::jpeg, item == "jpeg"
                                                ? 75
                                                : number(item.substr(5), 0, 100, "JPEG quality")});
@@ -148,10 +167,27 @@ std::vector<dpdfcomp::ColorEncoding> color_encodings(std::string_view list, bool
         else
             throw std::runtime_error("unknown color codec: " + std::string(item));
     }
+    const bool bilevel = std::any_of(result.begin(), result.end(),
+                                     [](auto encoding) { return encoding.codec == Codec::bilevel; });
+    if (scale && !bilevel)
+        warnings.push_back("bilevel scale specified, but bilevel is not one of the specified codecs.");
+    if (smooth && !bilevel)
+        warnings.push_back(
+            "bilevel smoothing specified, but bilevel is not one of the specified codecs.");
+    if (smooth && threshold)
+        warnings.push_back("bilevel thresholds are ignored because bilevel-smooth uses Otsu's method.");
+    for (auto& encoding : result)
+        if (encoding.codec == Codec::bilevel) {
+            encoding.scale = scale.value_or(100);
+            encoding.smooth = smooth;
+            if (smooth)
+                encoding.parameter = 0; // Otsu's method chooses; equal values merge.
+        }
     std::vector<dpdfcomp::ColorEncoding> unique;
     for (auto candidate : result)
         if (std::none_of(unique.begin(), unique.end(), [&](auto other) {
-                return candidate.codec == other.codec && candidate.parameter == other.parameter;
+                return candidate.codec == other.codec && candidate.parameter == other.parameter &&
+                       candidate.scale == other.scale && candidate.smooth == other.smooth;
             }))
             unique.push_back(candidate);
     if (specified_only && unique.empty())
@@ -260,6 +296,7 @@ int run(int argc, char** argv)
         bool jbig2_stripe_specified = false;
         std::vector<std::string> paths;
         std::array<std::vector<std::string>, 3> selections;
+        std::array<std::vector<std::string>, 2> color_warnings; // Lossless, lossy.
         for (int i = 1; i < argc; ++i) {
             std::string_view arg(argv[i]);
             if (positional || !arg.starts_with("-")) {
@@ -299,17 +336,19 @@ int run(int argc, char** argv)
                 options.color_lossless.clear();
                 options.color_lossless_specified_only = false;
                 selections[1].clear();
+                color_warnings[0].clear();
             } else if (arg == "--no-color-lossy") {
                 options.color_lossy.clear();
                 options.color_lossy_specified_only = false;
                 selections[2].clear();
+                color_warnings[1].clear();
             } else if (arg.starts_with("--color-lossless=")) {
-                options.color_lossless =
-                    color_encodings(arg.substr(17), options.color_lossless_specified_only);
+                options.color_lossless = color_encodings(
+                    arg.substr(17), options.color_lossless_specified_only, color_warnings[0]);
                 selections[1] = explicit_codecs(arg.substr(17));
             } else if (arg.starts_with("--color-lossy=")) {
-                options.color_lossy =
-                    color_encodings(arg.substr(14), options.color_lossy_specified_only);
+                options.color_lossy = color_encodings(
+                    arg.substr(14), options.color_lossy_specified_only, color_warnings[1]);
                 selections[2] = explicit_codecs(arg.substr(14));
             } else if (arg == "--reconstruct-stripes")
                 options.reconstruct_strips = true;
@@ -368,6 +407,9 @@ int run(int argc, char** argv)
         if (jbig2_stripe_specified && (!options.jbig2 || !options.recompress_bilevel))
             options.warning("JBIG2 stripe height specified, but JBIG2 is not one of the specified "
                             "output codecs.");
+        for (std::size_t i = 0; i < color_warnings.size(); ++i)
+            for (const auto& warning : color_warnings[i])
+                options.warning((i ? "--color-lossy: " : "--color-lossless: ") + warning);
         if (!quiet)
             options.progress = std::ref(progress);
         auto report = dpdfcomp::optimize(std::u8string(paths[0].begin(), paths[0].end()),

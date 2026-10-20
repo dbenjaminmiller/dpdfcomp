@@ -26,9 +26,16 @@ enum class ColorCodec { png, lzw, zip, jpeg, jp2_lossless, jp2_lossy, bilevel };
 struct ColorEncoding {
     ColorCodec codec;
     int parameter = 0; // PNG iterations, JPEG/JP2 quality, or bilevel threshold.
+    // Bilevel only: resample by this percentage before conversion. Images keep
+    // their size and position on the page; only their resolution changes.
+    int scale = 100;
+    // Bilevel only: Savitzky-Golay smoothing, then Otsu's method chooses the
+    // threshold in place of parameter.
+    bool smooth = false;
 };
 
 inline constexpr int default_png_iterations = 15;
+inline constexpr int max_bilevel_scale = 1000;
 
 struct Options {
     bool images = true;

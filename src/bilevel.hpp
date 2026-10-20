@@ -1,6 +1,7 @@
 #pragma once
 #include "raster.hpp"
 #include <array>
+#include <dpdfcomp/optimizer.hpp>
 #include <vector>
 
 namespace dpdfcomp
@@ -19,6 +20,8 @@ struct BilevelResult {
     std::optional<std::array<int, 2>> color_key;
     std::optional<std::string> mask; // Explicit stencil: 1 transparent, 0 opaque.
 };
+// Without a conversion, only exact black-and-white images convert, at their own
+// size. Otherwise the bilevel encoding's threshold, scale, and smoothing apply.
 std::optional<BilevelResult> convert_bilevel(const Raster&, const BilevelInput&,
-                                             std::optional<int> threshold);
+                                             std::optional<ColorEncoding> conversion);
 } // namespace dpdfcomp

@@ -87,6 +87,10 @@ Report optimize(const std::filesystem::path& input, const std::filesystem::path&
                  encoding.codec == ColorCodec::bilevel) &&
                 (encoding.parameter < 0 || encoding.parameter > 100))
                 throw std::invalid_argument("image quality or threshold must be between 0 and 100");
+            if (encoding.codec == ColorCodec::bilevel &&
+                (encoding.scale < 1 || encoding.scale > max_bilevel_scale))
+                throw std::invalid_argument("bilevel scale must be between 1 and " +
+                                            std::to_string(max_bilevel_scale));
         }
     if (options.bilevel_specified_only && !options.bilevel_flate && !options.ccitt &&
         !options.jbig2 && !options.bilevel_png_iterations)

@@ -4,6 +4,7 @@
 #include "pdf.hpp"
 #include "raster.hpp"
 #include <dpdfcomp/optimizer.hpp>
+#include <set>
 
 namespace dpdfcomp
 {
@@ -16,4 +17,7 @@ bool matches_codec(Object source, const Options&, bool bilevel,
                    const std::vector<ColorEncoding>& color);
 BilevelInput bilevel_input(Object source, const Raster&);
 std::optional<std::string> white_pixel(Object source, const Raster&);
+// Images whose samples define transparency rather than color: image soft masks,
+// and images painted within luminosity soft-mask groups.
+std::set<ObjectId> transparency_masks(QPDF&);
 } // namespace dpdfcomp

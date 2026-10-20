@@ -1,6 +1,7 @@
 #include "image_pdf.hpp"
 #include "image_codecs.hpp"
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -346,6 +347,60 @@ BilevelInput bilevel_input(Object source, const Raster& raster)
         }
     }
     result.colors = raster.colors;
+    return result;
+}
+
+std::set<ObjectId> transparency_masks(QPDF& pdf)
+{
+    std::set<ObjectId> result, groups, visited;
+    // Graphics state soft masks are often direct dictionaries within resources.
+    std::function<void(Object)> scan = [&](Object value) {
+        if (value.isStream())
+            value = value.getDict();
+        if (value.isDictionary()) {
+            auto mask = value.getKey("/SMask");
+            if (mask.isStream() && value.getKey("/Subtype").isNameAndEquals("/Image"))
+                result.insert(mask.getObjGen());
+            else if (mask.isDictionary() && mask.getKey("/S").isNameAndEquals("/Luminosity") &&
+                     mask.getKey("/G").isStream())
+                groups.insert(mask.getKey("/G").getObjGen());
+            for (const auto& key : value.getKeys()) {
+                auto child = value.getKey(key);
+                if (!child.isIndirect())
+                    scan(child);
+            }
+        } else if (value.isArray()) {
+            for (auto child : value.getArrayAsVector())
+                if (!child.isIndirect())
+                    scan(child);
+        }
+    };
+    for (auto object : pdf.getAllObjects())
+        scan(object);
+    // A luminosity group's painted images, including those within nested
+    // forms, tiling patterns, and Type 3 glyphs, all form part of the mask.
+    std::function<void(Object)> paint = [&](Object object) {
+        if (object.isIndirect() && !visited.insert(object.getObjGen()).second)
+            return;
+        auto dictionary = object.isStream() ? object.getDict() : object;
+        if (!dictionary.isDictionary())
+            return;
+        if (object.isStream() && dictionary.getKey("/Subtype").isNameAndEquals("/Image")) {
+            result.insert(object.getObjGen());
+            return;
+        }
+        auto resources = dictionary.getKey("/Resources");
+        if (!resources.isDictionary())
+            return;
+        for (const auto* category : {"/XObject", "/Pattern", "/Font"}) {
+            auto map = resources.getKey(category);
+            if (map.isDictionary())
+                for (const auto& key : map.getKeys())
+                    paint(map.getKey(key));
+        }
+    };
+    for (auto id : groups)
+        paint(pdf.getObjectByObjGen(id));
     return result;
 }
 
